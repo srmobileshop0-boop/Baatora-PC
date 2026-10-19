@@ -1,0 +1,51 @@
+name: Build Baatora PC (Windows Setup)
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Baatora PC project zip dhoondhein
+        shell: pwsh
+        run: |
+          $best = $null; $bestv = [version]'0.0.0'
+          foreach ($z in Get-ChildItem -Path . -Filter *.zip -File) {
+            $d = Join-Path $env:RUNNER_TEMP ("z_" + ($z.BaseName -replace '[^\w]', '_'))
+            Expand-Archive -Path $z.FullName -DestinationPath $d -Force
+            $pj = Get-ChildItem -Path $d -Recurse -Filter package.json | Where-Object { $_.FullName -notmatch 'node_modules' } | Select-Object -First 1
+            if ($pj) {
+              $j = Get-Content $pj.FullName -Raw | ConvertFrom-Json
+              if ($j.name -eq 'baatora-pc') {
+                $v = [version]$j.version
+                Write-Host "$($z.Name)  ->  version $v"
+                if ($v -ge $bestv) { $bestv = $v; $best = $pj.DirectoryName }
+              }
+            }
+          }
+          if (-not $best -and (Test-Path package.json)) { $best = (Get-Location).Path }
+          if (-not $best) { Write-Error "Baatora PC project zip nahi mila"; exit 1 }
+          Write-Host "==> Build ho raha hai: $best (version $bestv)"
+          "PROJ=$best" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: BaatoraSetup.exe banayein
+        shell: pwsh
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          cd "$env:PROJ"
+          npm install --no-audit --no-fund
+          npx electron-builder --win nsis --x64 --publish never
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Baatora-PC-Setup
+          path: ${{ env.PROJ }}/dist/BaatoraSetup.exe
