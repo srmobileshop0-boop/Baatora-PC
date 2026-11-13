@@ -4,6 +4,9 @@ on:
   push:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest
@@ -14,7 +17,7 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Baatora PC project zip dhoondhein
+      - name: Find the newest Baatora PC project zip
         shell: pwsh
         run: |
           $best = $null; $bestv = [version]'0.0.0'
@@ -32,18 +35,26 @@ jobs:
             }
           }
           if (-not $best -and (Test-Path package.json)) { $best = (Get-Location).Path }
-          if (-not $best) { Write-Error "Baatora PC project zip nahi mila"; exit 1 }
-          Write-Host "==> Build ho raha hai: $best (version $bestv)"
+          if (-not $best) { Write-Error "Baatora PC project zip not found"; exit 1 }
+          Write-Host "==> Building: $best (version $bestv)"
           "PROJ=$best" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
-      - name: BaatoraSetup.exe banayein
+      - name: Build BaatoraSetup.exe and publish the update (GitHub Release)
         shell: pwsh
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Optional code signing (removes "Windows protected your PC"): add these repo secrets
+          CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
         run: |
           cd "$env:PROJ"
           npm install --no-audit --no-fund
-          npx electron-builder --win nsis --x64 --publish never
+          npx electron-builder --win nsis --x64 --publish always
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "Publishing failed (maybe this version already exists) - building without publishing"
+            npx electron-builder --win nsis --x64 --publish never
+          }
 
       - uses: actions/upload-artifact@v4
         with:
